@@ -20,12 +20,40 @@ import (
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/p2p/net/connmgr"
 	multiaddr "github.com/multiformats/go-multiaddr"
 
 	"github.com/user/libp2p_test/pkg/chat"
 	"github.com/user/libp2p_test/pkg/discovery"
 )
+
+// multiaddrsFlag is a repeatable -bootstrap flag that accumulates peer multiaddrs.
+type multiaddrsFlag []string
+
+func (f *multiaddrsFlag) String() string { return fmt.Sprintf("%v", *f) }
+func (f *multiaddrsFlag) Set(v string) error {
+	*f = append(*f, v)
+	return nil
+}
+
+// parseBootstrapPeers converts multiaddr strings (e.g. /ip4/.../tcp/.../p2p/12D3Koo...)
+// into peer.AddrInfo values suitable for DHT bootstrap.
+func parseBootstrapPeers(addrs []string) ([]peer.AddrInfo, error) {
+	peers := make([]peer.AddrInfo, 0, len(addrs))
+	for _, s := range addrs {
+		ma, err := multiaddr.NewMultiaddr(s)
+		if err != nil {
+			return nil, fmt.Errorf("invalid bootstrap multiaddr %q: %w", s, err)
+		}
+		pi, err := peer.AddrInfoFromP2pAddr(ma)
+		if err != nil {
+			return nil, fmt.Errorf("bootstrap multiaddr %q missing /p2p component: %w", s, err)
+		}
+		peers = append(peers, *pi)
+	}
+	return peers, nil
+}
 
 func loadOrCreateKey(path string) (crypto.PrivKey, error) {
 	data, err := os.ReadFile(path)
@@ -60,10 +88,17 @@ func main() {
 	nick := flag.String("nick", "gateway", "Chat nickname for this node")
 	keyFile := flag.String("keyfile", "", "Path to persist Ed25519 private key")
 	debugPubsub := flag.Bool("debug-pubsub", false, "Enable debug logging for pubsub")
+	var bootstrapAddrs multiaddrsFlag
+	flag.Var(&bootstrapAddrs, "bootstrap", "Peer multiaddr to bootstrap from (repeatable, e.g. /ip4/1.2.3.4/tcp/4001/p2p/12D3Koo...)")
 	flag.Parse()
 
 	if *debugPubsub {
 		logging.SetLogLevel("pubsub", "debug")
+	}
+
+	bootstrapPeers, err := parseBootstrapPeers(bootstrapAddrs)
+	if err != nil {
+		log.Fatalf("bootstrap peers: %v", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -159,7 +194,7 @@ func main() {
 	})
 
 	// DHT server: other peers bootstrap from us and find peers through us.
-	kadDHT, err := discovery.NewDHT(ctx, h, nil, dht.ModeServer)
+	kadDHT, err := discovery.NewDHT(ctx, h, bootstrapPeers, dht.ModeServer)
 	if err != nil {
 		log.Fatalf("DHT: %v", err)
 	}

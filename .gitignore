@@ -5,4 +5,4 @@ bin/
 # Node / browser-client
 browser-client/node_modules/
 browser-client/dist/
-gateway
+/gateway
