@@ -1,0 +1,8 @@
+# Go
+bin/
+*.key
+
+# Node / browser-client
+browser-client/node_modules/
+browser-client/dist/
+gateway
