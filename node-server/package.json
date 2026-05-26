@@ -1,0 +1,29 @@
+{
+  "name": "libp2p-test-node-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "patch-package",
+    "gateway": "node gateway.js --tcp 4001 --ws 4002 --api 4000 --nick gateway-node",
+    "peer": "node peer.js"
+  },
+  "dependencies": {
+    "@chainsafe/libp2p-gossipsub": "^14.1.2",
+    "@chainsafe/libp2p-noise": "^17.0.0",
+    "@libp2p/circuit-relay-v2": "^4.2.5",
+    "@libp2p/dcutr": "*",
+    "@libp2p/identify": "^4.1.6",
+    "@libp2p/kad-dht": "^16.3.0",
+    "@libp2p/mdns": "^12.0.22",
+    "@libp2p/ping": "^3.1.5",
+    "@libp2p/tcp": "^11.0.20",
+    "@libp2p/websockets": "^10.1.13",
+    "@libp2p/yamux": "^8.0.1",
+    "@multiformats/multiaddr": "^13.0.3",
+    "libp2p": "^3.3.1"
+  },
+  "devDependencies": {
+    "patch-package": "^8.0.1"
+  }
+}

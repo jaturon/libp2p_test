@@ -1,0 +1,101 @@
+diff --git a/node_modules/@chainsafe/libp2p-gossipsub/dist/src/index.js b/node_modules/@chainsafe/libp2p-gossipsub/dist/src/index.js
+index ef02fd0..4c88645 100644
+--- a/node_modules/@chainsafe/libp2p-gossipsub/dist/src/index.js
++++ b/node_modules/@chainsafe/libp2p-gossipsub/dist/src/index.js
+@@ -34,7 +34,7 @@ export class GossipSub extends TypedEventEmitter {
+      * The signature policy to follow by default
+      */
+     globalSignaturePolicy;
+-    multicodecs = [constants.GossipsubIDv12, constants.GossipsubIDv11, constants.GossipsubIDv10];
++    multicodecs = [constants.GossipsubIDv11, constants.GossipsubIDv10];
+     publishConfig;
+     dataTransform;
+     // State
+@@ -313,7 +313,10 @@ export class GossipSub extends TypedEventEmitter {
+         const registrar = this.components.registrar;
+         // Incoming streams
+         // Called after a peer dials us
+-        await Promise.all(this.multicodecs.map(async (multicodec) => registrar.handle(multicodec, this.onIncomingStream.bind(this), {
++        // PATCH: libp2p v3 calls handlers as (stream, connection) but gossipsub v14 expects ({ stream, connection })
++        const _self = this;
++        const _incomingStreamHandler = (stream, connection) => _self.onIncomingStream({ stream, connection });
++        await Promise.all(this.multicodecs.map(async (multicodec) => registrar.handle(multicodec, _incomingStreamHandler, {
+             maxInboundStreams: this.maxInboundStreams,
+             maxOutboundStreams: this.maxOutboundStreams,
+             runOnLimitedConnection: this.runOnLimitedConnection
+diff --git a/node_modules/@chainsafe/libp2p-gossipsub/dist/src/stream.js b/node_modules/@chainsafe/libp2p-gossipsub/dist/src/stream.js
+index 1f156a2..6cbd46a 100644
+--- a/node_modules/@chainsafe/libp2p-gossipsub/dist/src/stream.js
++++ b/node_modules/@chainsafe/libp2p-gossipsub/dist/src/stream.js
+@@ -17,7 +17,27 @@ export class OutboundStream {
+                 rawStream.abort(err);
+             });
+         });
+-        pipe(this.pushable, this.rawStream).catch(errCallback);
++        // PATCH: libp2p v3 streams use event-based send() instead of it-pipe sink
++        const _rawStream = rawStream;
++        const _pushable = this.pushable;
++        (async () => {
++            for await (const data of _pushable) {
++                try {
++                    if (!_rawStream.send(data)) {
++                        await new Promise((res, rej) => {
++                            const onDrain = () => { _rawStream.removeEventListener('close', onClose); res(); };
++                            const onClose = (evt) => { _rawStream.removeEventListener('drain', onDrain); rej(evt.error ?? new Error('stream closed')); };
++                            _rawStream.addEventListener('drain', onDrain, { once: true });
++                            _rawStream.addEventListener('close', onClose, { once: true });
++                        });
++                    }
++                } catch (e) {
++                    errCallback(e);
++                    return;
++                }
++            }
++            _rawStream.close().catch(() => {});
++        })().catch(errCallback);
+     }
+     get protocol() {
+         // TODO remove this non-nullish assertion after https://github.com/libp2p/js-libp2p-interfaces/pull/265 is incorporated
+diff --git a/node_modules/@chainsafe/libp2p-gossipsub/dist/src/utils/multiaddr.js b/node_modules/@chainsafe/libp2p-gossipsub/dist/src/utils/multiaddr.js
+index abcdef1..1234567 100644
+--- a/node_modules/@chainsafe/libp2p-gossipsub/dist/src/utils/multiaddr.js
++++ b/node_modules/@chainsafe/libp2p-gossipsub/dist/src/utils/multiaddr.js
+@@ -1,18 +1,26 @@
+ import { convertToString } from '@multiformats/multiaddr/convert';
++// PATCH: multiaddr v13 removed tuples(); getComponents() returns {code,name,value} (value is already string)
+ // Protocols https://github.com/multiformats/multiaddr/blob/master/protocols.csv
+ // code  size  name
+ // 4     32    ip4
+ // 41    128   ip6
+ var Protocol;
+ (function (Protocol) {
+     Protocol[Protocol["ip4"] = 4] = "ip4";
+     Protocol[Protocol["ip6"] = 41] = "ip6";
+ })(Protocol || (Protocol = {}));
+ export function multiaddrToIPStr(multiaddr) {
+-    for (const tuple of multiaddr.tuples()) {
+-        switch (tuple[0]) {
+-            case Protocol.ip4:
+-            case Protocol.ip6:
+-                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+-                return convertToString(tuple[0], tuple[1]);
+-            default:
+-                break;
++    if (typeof multiaddr.tuples === 'function') {
++        for (const tuple of multiaddr.tuples()) {
++            switch (tuple[0]) {
++                case Protocol.ip4:
++                case Protocol.ip6:
++                    return convertToString(tuple[0], tuple[1]);
++                default:
++                    break;
++            }
++        }
++    } else {
++        for (const comp of (multiaddr.getComponents?.() ?? [])) {
++            if (comp.code === Protocol.ip4 || comp.code === Protocol.ip6) {
++                return comp.value;
++            }
+         }
+     }
+     return null;
