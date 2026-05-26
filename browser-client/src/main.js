@@ -171,6 +171,26 @@ function esc(s) {
 
 // ── boot ──────────────────────────────────────────────────────────────────────
 
+async function autoDiscoverGateway() {
+  const apiBase = `http://${window.location.hostname}:4000`
+  try {
+    const res = await fetch(`${apiBase}/api/info`, { signal: AbortSignal.timeout(2000) })
+    if (!res.ok) return
+    const info = await res.json()
+    const addrs = info.addrs ?? []
+    // Prefer WebTransport, fall back to WebSocket.
+    const wt = addrs.find(a => a.includes('/webtransport'))
+    const ws = addrs.find(a => a.includes('/ws'))
+    const chosen = wt ?? ws
+    if (chosen) {
+      $('addr-input').value = chosen
+      log(`Auto-discovered gateway: ${chosen}`, 'ok')
+    }
+  } catch {
+    // Gateway not reachable — user must paste the address manually.
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   // WebTransport is Chrome 97+ / Edge 97+ only.
   if (typeof WebTransport === 'undefined') {
@@ -178,6 +198,8 @@ document.addEventListener('DOMContentLoaded', () => {
     $('connect-btn').disabled = true
     log('WebTransport not available — use Chrome 97+ / Edge 97+', 'error')
   }
+
+  autoDiscoverGateway()
 
   const connectBtn = $('connect-btn')
   const sendBtn    = $('send-btn')

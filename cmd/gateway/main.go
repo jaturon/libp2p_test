@@ -5,9 +5,11 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -87,6 +89,7 @@ func main() {
 	topicName := flag.String("topic", "libp2p_test-chat", "GossipSub chat topic")
 	nick := flag.String("nick", "gateway", "Chat nickname for this node")
 	keyFile := flag.String("keyfile", "", "Path to persist Ed25519 private key")
+	apiPort := flag.Int("api", 4000, "HTTP API port for /api/info (set 0 to disable)")
 	debugPubsub := flag.Bool("debug-pubsub", false, "Enable debug logging for pubsub")
 	var bootstrapAddrs multiaddrsFlag
 	flag.Var(&bootstrapAddrs, "bootstrap", "Peer multiaddr to bootstrap from (repeatable, e.g. /ip4/1.2.3.4/tcp/4001/p2p/12D3Koo...)")
@@ -167,6 +170,30 @@ func main() {
 		fmt.Printf("  %s/p2p/%s\n", addr, h.ID())
 	}
 	fmt.Println()
+
+	// HTTP /api/info — lets the browser client auto-discover the gateway multiaddrs.
+	if *apiPort != 0 {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/api/info", func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Content-Type", "application/json")
+			addrs := make([]string, 0)
+			for _, a := range h.Addrs() {
+				addrs = append(addrs, fmt.Sprintf("%s/p2p/%s", a, h.ID()))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"peer_id": h.ID().String(),
+				"addrs":   addrs,
+			})
+		})
+		go func() {
+			addr := fmt.Sprintf(":%d", *apiPort)
+			log.Printf("API server listening on %s", addr)
+			if err := http.ListenAndServe(addr, mux); err != nil {
+				log.Printf("API server: %v", err)
+			}
+		}()
+	}
 
 	// Log protocols each peer advertises after identify completes.
 	sub, err := h.EventBus().Subscribe(new(event.EvtPeerIdentificationCompleted))
