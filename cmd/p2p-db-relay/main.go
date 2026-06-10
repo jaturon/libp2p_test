@@ -67,6 +67,11 @@ func main() {
 	apiPort := flag.Int("api",    4010, "HTTP port for /api/info and /healthz")
 	extIP   := flag.String("extip",  "", "Public IP to announce (for NAT/firewall)")
 	extPort := flag.Int("extport",  0,  "Public WS port to announce (default = -ws)")
+	extWSSHost := flag.String("extwss-host", "",
+		"Hostname of a TLS-terminating reverse proxy in front of -ws (e.g. local-ai-home). "+
+			"When set, an additional /dns4/<host>/tcp/<extwss-port>/wss address is announced "+
+			"so HTTPS browser pages can dial the relay without mixed-content errors.")
+	extWSSPort := flag.Int("extwss-port", 4013, "Public port of the TLS-terminating reverse proxy (used with -extwss-host)")
 	keyFile := flag.String("keyfile", "./relay.key", "Ed25519 key file for stable peer ID")
 	topicsFlag := flag.String("topics",
 		"p2p-db-notes-v1,_peer-discovery._p2p._pubsub",
@@ -114,8 +119,21 @@ func main() {
 			if err != nil {
 				return addrs
 			}
-			// Return only the public address so browsers don't try docker-internal IPs
-			return []multiaddr.Multiaddr{ma}
+			// Return only the public address(es) so browsers don't try docker-internal IPs
+			out := []multiaddr.Multiaddr{ma}
+
+			// Also announce a wss address via the TLS-terminating reverse proxy,
+			// so HTTPS pages can dial the relay (plain ws:// is blocked as
+			// mixed content from an https:// origin).
+			if *extWSSHost != "" {
+				wssMa, err := multiaddr.NewMultiaddr(
+					fmt.Sprintf("/dns4/%s/tcp/%d/wss", *extWSSHost, *extWSSPort),
+				)
+				if err == nil {
+					out = append(out, wssMa)
+				}
+			}
+			return out
 		}),
 
 		// Circuit relay server — gives each browser a /p2p-circuit/ address
